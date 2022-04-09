@@ -1,22 +1,21 @@
 #include <Python.h>
 #include <numpy/arrayobject.h>
-#include "neighbors/neighbors.h"
+#include "src/normals.h"
 #include <string>
-
 
 
 // docstrings for our module
 // *************************
 
-static char module_docstring[] = "This module provides two methods to compute radius neighbors from pointclouds or batch of pointclouds";
+static char module_docstring[] = "This module implements the method for multi-scale normal filtering";
 
-static char batch_query_docstring[] = "Method to get radius neighbors in a batch of stacked pointclouds";
+static char function_docstring[] = "Function to get filtered normals of each point";
 
 
 // Declare the functions
 // *********************
 
-static PyObject *batch_neighbors(PyObject *self, PyObject *args, PyObject *keywds);
+static PyObject *main_function(PyObject *self, PyObject *args, PyObject *keywds);
 
 
 // Specify the members of the module
@@ -24,7 +23,7 @@ static PyObject *batch_neighbors(PyObject *self, PyObject *args, PyObject *keywd
 
 static PyMethodDef module_methods[] = 
 {
-	{ "batch_query", (PyCFunction)batch_neighbors, METH_VARARGS | METH_KEYWORDS, batch_query_docstring },
+	{ "normal_filtering", (PyCFunction)main_function, METH_VARARGS | METH_KEYWORDS, function_docstring },
 	{NULL, NULL, 0, NULL}
 };
 
@@ -35,7 +34,7 @@ static PyMethodDef module_methods[] =
 static struct PyModuleDef moduledef = 
 {
     PyModuleDef_HEAD_INIT,
-    "radius_neighbors",		// m_name
+    "cpp_normals",			// m_name
     module_docstring,       // m_doc
     -1,                     // m_size
     module_methods,         // m_methods
@@ -45,7 +44,7 @@ static struct PyModuleDef moduledef =
     NULL,                   // m_free
 };
 
-PyMODINIT_FUNC PyInit_radius_neighbors(void)
+PyMODINIT_FUNC PyInit_cpp_normals(void)
 {
     import_array();
 	return PyModule_Create(&moduledef);
@@ -55,7 +54,7 @@ PyMODINIT_FUNC PyInit_radius_neighbors(void)
 // Definition of main method
 // **********************************
 
-static PyObject* batch_neighbors(PyObject* self, PyObject* args, PyObject* keywds)
+static PyObject* main_function(PyObject* self, PyObject* args, PyObject* keywds)
 {
 
 	// Manage inputs

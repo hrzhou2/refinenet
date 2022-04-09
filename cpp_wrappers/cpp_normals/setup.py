@@ -1,17 +1,14 @@
 from distutils.core import setup, Extension
 import numpy.distutils.misc_util
 
-# Adding OpenCV to project
-# ************************
-
 # Adding sources of the project
 # *****************************
 
 SOURCES = ["../cpp_utils/cloud/cloud.cpp",
-             "neighbors/neighbors.cpp",
+             "src/normals.cpp",
              "wrapper.cpp"]
 
-module = Extension(name="radius_neighbors",
+module = Extension(name="cpp_normals",
                     sources=SOURCES,
                     extra_compile_args=['-std=c++11',
                                         '-D_GLIBCXX_USE_CXX11_ABI=0'])
