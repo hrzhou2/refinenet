@@ -16,7 +16,8 @@ Date: 2022-3-13
 import os
 import numpy as np
 import torch
-import cpp_wrappers.cpp_normals.radius_neighbors as cpp_normals
+from cpp_wrappers.cpp_normals import cpp_normals
+from cpp_wrappers.cpp_height import cpp_height
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -45,9 +46,24 @@ def get_normal_features(points, normals, radius, sigma_s, sigma_r, self_included
     self_included = int(self_included)
 
     # Normal filtering
-    new_normals = cpp_normals.batch_query(points, normals, sigma_s, sigma_r, radius, self_included)
+    new_normals = cpp_normals.normal_filtering(points, normals, sigma_s, sigma_r, radius, self_included)
 
     return new_normals
+
+
+def get_height_features(points, features, rotation, map_size, query_k):
+    '''
+    Compute height map features.
+    '''
+
+    points = points.copy()
+    features = features.copy()
+    rotation = rotation.copy()
+
+    # Get features
+    heights = cpp_height.height_distances(points, features, rotation, map_size, query_k)
+
+    return heights
 
 
 def get_cluster_indices(normals, cluster_dir):
@@ -111,4 +127,16 @@ def batch_normals_pca(normals, all_positive=True, descending=False):
     normals = torch.matmul(normals, trans).view(B, -1)
 
     return normals, trans
+
+
+def reorient_normals(normals, gt_normals):
+    '''
+    Normal reorientation according to gt. (unoriented estimate)
+    '''
+
+    flags = np.sum(normals * gt_normals, axis=1) > 0
+    flags = flags.astype(np.float32)*2 - 1
+    normals = normals * np.expand_dims(flags, axis=1)
+
+    return normals
 

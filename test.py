@@ -19,7 +19,8 @@ import sys
 import os
 import json
 from importlib import import_module
-from pcpnet import MultiFeatureDataset as Dataset
+from datasets import MultiFeatureDataset as Dataset
+from datasets import collate_fn
 from utils.easydict import EasyDict as edict
 from utils.loss import angle_degrees
 
@@ -85,12 +86,14 @@ def test_models(config, args):
         test_dataloader = torch.utils.data.DataLoader(test_dataset,
                                                     batch_size=model_config.train.batch_size,
                                                     num_workers=model_config.train.num_workers,
-                                                    shuffle=False)
+                                                    shuffle=False,
+                                                    pin_memory=True,
+                                                    collate_fn=collate_fn)
         nfeatures = len(model_config.feature.sigma_s) * len(model_config.feature.sigma_r) + int(model_config.feature.self_included)
 
         # Load network model
         MODEL = import_module(args.model)
-        net = MODEL.Net(nfeat=nfeatures, nhidden=model_config.network.feat_dim, dropout=model_config.network.dropout)
+        net = MODEL.Net(model_config, nfeat=nfeatures)
         net.to(device)
         model_filename = os.path.join(model_dir, model_name, 'ckpt-best.pth')
         net.load_state_dict(torch.load(model_filename, map_location='cpu'))
@@ -112,23 +115,21 @@ def test_models(config, args):
         for batch_idx, data in enumerate(test_dataloader):
 
             # unpack data
-            nf, points, gt = data[0], data[1], data[2]
-
-            nf = nf.to(device)
-            points = points.to(device)
-            gt = gt.to(device)
-            points = points.transpose(2, 1)
+            for k, v in data.items():
+                if k != 'trans':
+                    data[k] = v.to(device)
 
             # forward
             with torch.no_grad():
-                output = net(points, nf)
+                output = net(data)
 
             # get normal angular error
+            gt = data['normal']
             degrees = angle_degrees(output.detach().cpu().numpy(), gt.detach().cpu().numpy())
             all_degrees.append(degrees)
 
             # get real normals, transform back to real-world coordinates
-            trans = data[-1].to(device)
+            trans = data['trans'].to(device)
             trans_normals = torch.matmul(output.unsqueeze(1), trans.transpose(1, 2)).squeeze()
             model_preds[model_name].append(trans_normals.detach().cpu().numpy())
 
@@ -138,7 +139,7 @@ def test_models(config, args):
                 last_shape = shape_idx
                 print('{:s}: shape {:d}/{:d}'.format(model_name, shape_idx, total_shape-1))
 
-            cnt += points.size(0)
+            cnt += output.size(0)
 
 
         # compute mean errors
@@ -159,6 +160,7 @@ def test_models(config, args):
     # Save Predicted Results
     ########################
 
+    shape_samples = []
     shape_degrees = []
     shape_rmse = []
     subset_degrees = []
@@ -190,6 +192,7 @@ def test_models(config, args):
 
         # shape errors
         degrees = angle_degrees(shape_preds, gt_normals)
+        shape_samples.append(degrees.shape[0])
         shape_degrees.append(np.mean(degrees))
         shape_rmse.append(np.sqrt(np.mean(np.square(degrees))))
 
@@ -214,15 +217,17 @@ def test_models(config, args):
         # record model scores
         file.write('model\tnsamples\tdegree\trmse\n')
         for model_idx, model_name in enumerate(list_models):
-            file.write('{:s}\t{:d}\t{:.4f}\n'.format(model_name, model_samples[model_name], model_degrees[model_name], model_rmse[model_name]))
+            file.write('{:s}\t{:d}\t{:.4f}\t{:.4f}\n'.format(model_name, model_samples[model_name], model_degrees[model_name], model_rmse[model_name]))
         file.write('-----------------------------\n\n')
 
         # record shape scores
-        file.write('shape\tdegree\trmse\n')
+        file.write('shape\tnsamples\tdegree\trmse\n')
         for shape_idx, shape_name in enumerate(test_dataset.shape_names):
-            file.write('{:s}\t{:.4f}\t{:.4f}\n'.format(shape_name, shape_degrees[shape_idx], shape_rmse[shape_idx]))
-        # average shape scores
-        file.write('MEAN\t{:.4f}\t{:.4f}\n\n'.format(sum(shape_degrees) / len(shape_degrees), sum(shape_rmse) / len(shape_rmse)))
+            file.write('{:s}\t{:d}\t{:.4f}\t{:.4f}\n'.format(shape_name, shape_samples[shape_idx], shape_degrees[shape_idx], shape_rmse[shape_idx]))
+        # overall scores
+        overall_degree = sum([d*n for d, n in zip(shape_degrees, shape_samples)]) / sum(shape_samples)
+        overall_rmse = sum([d*n for d, n in zip(shape_rmse, shape_samples)]) / sum(shape_samples)
+        file.write('MEAN\t{:.4f}\t{:.4f}\n\n'.format(overall_degree, overall_rmse))
 
         # record sparse patches
         if args.sparse_patches:

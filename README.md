@@ -18,7 +18,7 @@ If you find our work useful in your research, please cite our paper:
 
 ## Install
 
-* The code has been tested on one configuration:
+* The code has been tested on this configuration:
     - PyTorch == 1.1.0
     - python == 3.7.10
     - CUDA == 10.1
@@ -30,17 +30,21 @@ If you find our work useful in your research, please cite our paper:
         sh compile_wrappers.sh
 
 
-## Datasets
+## Datasets and Results
 
 The original pcpnet dataset can be downloaded from [here](http://geometry.cs.ucl.ac.uk/projects/2018/pcpnet/pclouds.zip). We also provide our processed dataset and normal results [here](https://drive.google.com/drive/folders/1rbCdYmXfaZ2cRgSZynlfdsoyJUr8keNg?usp=sharing).
 
-Our own synthetic dataset: Coming soon.
+Our synthetic benchmark from [here](https://drive.google.com/file/d/12Hvyq_lmqQG7w83gYKsxrLq8MkOhuenj/view?usp=sharing). 
+
+Besides, we provide other RefineNet results on [Kinect_v1](https://drive.google.com/file/d/1zZGOMaFCXC5dT2SQDb4GGagYDv_5TwLh/view?usp=sharing) and [NYU_V2](https://drive.google.com/file/d/11bA1f2ayseiZm4SvWEt9Lo1n7iu06osG/view?usp=sharing).
+
+![result](./pictures/teaser.jpg)
 
 ## Usage
 
-### Training
+### Training on pcpnet
 
-Before training, specify your dataset directories in `train.py`:
+Before training, specify your dataset directories in `config_pcpnet.py`:
 
     cfg.dataset.pointcloud_dir = '<*PATH-TO-YOUR-DATASET*>/pcpnet'
 
@@ -50,17 +54,34 @@ RefineNet takes a set of initial normals as input. You can use your own initial 
 
 To train RefineNet, simply run:
 
-    python3 train.py
+    sh train_pcpnet.sh
 
 ### Testing
 
 To test RefineNet, you should provide the pretrained models:
 
-    python3 train.py --test --pretrained <*PATH-TO-PRETRAINED*>
+    python3 train.py --config pcpnet --test --pretrained <*PATH-TO-PRETRAINED*>
 
-For example, the default path for pretrained models is `./results/train`:
+For example, the default path for pretrained models is `./results/train_Config_pcpnet`:
 
-    python3 train.py --test --pretrained train
+    python3 train.py --config pcpnet --test --pretrained train_Config_pcpnet
+
+
+### Training on synthetic benchmark
+
+To use our synthetic dataset for training, specify the directories in `config_synthetic.py`:
+
+    cfg.dataset.pointcloud_dir = '<*PATH-TO-YOUR-DATASET*>/benchmark'
+    cfg.dataset.normal_dir = '<*PATH-TO-NORMALS*>/initial_normals'
+
+Then, run:
+
+    sh train_synthetic.sh
+
+Similarly, to test a pretrained model:
+
+    python3 train.py --config synthetic --test --pretrained <*PATH-TO-PRETRAINED*>
+
 
 ### Initial Normal Estimation
 
@@ -72,13 +93,9 @@ To use your own dataset, simply change the data path in `./matlab/RUN.m`:
 
 
 
-### Some Results
-
-![result](./pictures/teaser.jpg)
-
-
 ## 🔥Update
 * 2022-03-18: Initial Update.
+* 2022-04-08: Update synthetic benchmark and other results.
 
 
 ## Acknowledgment

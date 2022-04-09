@@ -2,7 +2,7 @@
 ==============================================================
 
 RefineNet Point Cloud Normal Refinement Network
--> Training on PCPNet
+-> Training
 
 ==============================================================
 
@@ -25,8 +25,8 @@ import argparse
 from test import test_models
 from importlib import import_module
 from utils.easydict import EasyDict as edict
-from pcpnet import MultiFeatureDataset as Dataset
-from pcpnet import RandomPointcloudPatchSampler
+from datasets import MultiFeatureDataset as Dataset
+from datasets import RandomPointcloudPatchSampler, collate_fn
 from utils.loss import angle_degrees, compute_loss
 
 
@@ -41,9 +41,10 @@ TRAIN_NAME = __file__.split('.')[0]
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--desc', type=str, default='RefineNet Training on PCPNet.', help='description')
+parser.add_argument('--desc', type=str, default='RefineNet Training on synthetic dataset.', help='description')
+parser.add_argument('--config', type=str, default='', help='Dataset configuration: [pcpnet, synthetic]')
 parser.add_argument('--gpu_idx', type=int, default=0, help='set < 0 to use CPU')
-parser.add_argument('--model', type=str, default='model', help='Model to use')
+parser.add_argument('--model', type=str, default='model_syn', help='Model to use')
 parser.add_argument('--id_cluster', type=int, default=None, help='Network for i-th cluster.')
 parser.add_argument('--trainset', type=str, default=None, help='Specify other training set')
 parser.add_argument('--validateset', type=str, default=None, help='Specify other validation set')
@@ -52,99 +53,9 @@ parser.add_argument('--testset', type=str, default=None, help='Specify other tes
 parser.add_argument('--test', dest='test', help='Test neural networks', action='store_true')
 parser.add_argument('--output', type=int, default=True, help='Output testing results.')
 parser.add_argument('--pretrained', type=str, default=None, help='Pretrained model for testing.')
-parser.add_argument('--sparse_patches', type=int, default=True, help='evaluate on a sparse set of patches, given by a .pidx file containing the patch center point indices.')
+parser.add_argument('--sparse_patches', type=int, default=False, help='evaluate on a sparse set of patches, given by a .pidx file containing the patch center point indices.')
 
 args =  parser.parse_args()
-
-
-def PCPNetConfig():
-
-    cfg = edict()
-
-    #############
-    # Directories
-    #############
-
-    cfg.dir = edict()
-    cfg.dir.result = './results'
-    cfg.dir.test = './test'
-
-
-    ################
-    # Dataset Config
-    ################
-
-    cfg.dataset = edict()
-
-    # Path to dataset
-    cfg.dataset.pointcloud_dir = '<*PATH-TO-YOUR-DATASET*>/pcpnet'
-    cfg.dataset.normal_dir = '<*PATH-TO-NORMALS*>/initial_normals'
-    cfg.dataset.cluster_dir = './cluster'
-    cfg.dataset.train_shape_filenames = 'trainingset_whitenoise.txt'
-    cfg.dataset.validate_shape_filenames = 'validationset_whitenoise.txt'
-    cfg.dataset.test_shape_filenames = 'testset_whitenoise.txt'
-
-    # dataset
-    cfg.dataset.patches_per_shape = 100000
-    cfg.dataset.cluster = 1
-
-
-    ####################
-    # Feature Processing
-    ####################
-
-    cfg.feature = edict()
-    cfg.feature.patch_features = ['normal']
-
-    # normal processing
-    cfg.feature.filter_radius = 0.03
-    cfg.feature.sigma_s = [1.0, 2.0]
-    cfg.feature.sigma_r = [0.1, 0.2, 0.35, 0.5]
-    cfg.feature.self_included = True
-
-    # patch points
-    cfg.feature.query = 'knn'
-    cfg.feature.center = 'point'
-    cfg.feature.query_k = 100
-    cfg.feature.query_radius = 0.03
-    cfg.feature.points_per_patch = 300
-
-    # batch normals pca reorientation
-    cfg.feature.use_pca = True
-
-
-    #######################
-    # Network Configuration
-    #######################
-
-    cfg.network = edict()
-    cfg.network.feat_dim = 64
-    cfg.network.dropout = 0.3
-
-
-    ##########
-    # Training
-    ##########
-
-    cfg.train = edict()
-    cfg.train.lr = 0.0001
-    cfg.train.batch_size = 1024
-    cfg.train.max_epochs = 1000
-    cfg.train.num_workers = 8
-    cfg.train.patience = 20
-
-    # Normal loss function
-    # 'mse_loss': element-wise mean square error
-    # 'ms_euclidean': mean square euclidean distance
-    # 'ms_oneminuscos': mean square 1-cos(angle error)
-    cfg.train.normal_loss = 'mse_loss'
-
-    # optimizer
-    cfg.train.momentum = 0.9
-    cfg.train.weight_decay = 0.02
-
-
-    return cfg
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -159,7 +70,7 @@ def main(config):
 
     # Set up folders for logs and checkpoints
     #timestr = time.strftime('_Log_%Y_%m_%d_%H_%M_%S', time.gmtime())
-    outdir = os.path.join(config.dir.result, TRAIN_NAME, 'model_cidx{:d}'.format(config.dataset.cluster))
+    outdir = os.path.join(config.dir.result, TRAIN_NAME+'_Config_'+args.config, 'model_cidx{:d}'.format(config.dataset.cluster))
     config.dir.result = outdir
     indir = config.dataset.pointcloud_dir
     if not os.path.exists(outdir):
@@ -183,19 +94,17 @@ def main(config):
     train_dataloader = torch.utils.data.DataLoader(train_dataset,
                                                 sampler=train_sampler,
                                                 batch_size=config.train.batch_size,
-                                                num_workers=config.train.num_workers)
+                                                num_workers=config.train.num_workers,
+                                                pin_memory=True,
+                                                collate_fn=collate_fn)
     validate_dataloader = torch.utils.data.DataLoader(validate_dataset,
                                                 sampler=validate_sampler,
                                                 batch_size=config.train.batch_size,
-                                                num_workers=config.train.num_workers // 2)
+                                                num_workers=config.train.num_workers // 2,
+                                                pin_memory=True,
+                                                collate_fn=collate_fn)
 
     nfeatures = len(config.feature.sigma_s) * len(config.feature.sigma_r) + int(config.feature.self_included)
-
-    # dataset info
-    print('Data Preparation Done:')
-    print('Trainset {}, Samples {}'.format(len(train_dataset), len(train_sampler)))
-    print('Validateset {}, Samples {}'.format(len(validate_dataset), len(validate_sampler)))
-    print()
 
 
     ######################
@@ -203,7 +112,7 @@ def main(config):
     ######################
 
     MODEL = import_module(args.model)
-    net = MODEL.Net(nfeat=nfeatures, nhidden=config.network.feat_dim, dropout=config.network.dropout)
+    net = MODEL.Net(config, nfeat=nfeatures)
     net.to(device)
 
 
@@ -289,6 +198,11 @@ class Manager:
     def train(self, net, train_dataloader, validate_dataloader, config, device):
 
         # Record File
+        self.train_record(str(args) + '\n')
+        self.train_record('------------------------')
+        self.train_record('###  Start Training  ###')
+        self.train_record('------------------------')
+
         print('Testing Record:')
         self.test_record('#epoch mean_degree mean_rmse | #best_epoch best_{}'.format(self.metric))
 
@@ -312,17 +226,15 @@ class Manager:
             for batch_id, data in enumerate(train_dataloader):
 
                 # unpack data
-                nf, points, gt = data[0], data[1], data[2]
-
-                nf = nf.to(device)
-                points = points.to(device)
-                gt = gt.to(device)
-                points = points.transpose(2, 1)
+                for k, v in data.items():
+                    if k != 'trans':
+                        data[k] = v.to(device)
 
                 # forward
-                output = net(points, nf)
+                output = net(data)
 
                 # get loss
+                gt = data['normal']
                 loss = compute_loss(output, gt, loss_type=config.train.normal_loss)
 
                 self.optimizer.zero_grad()
@@ -330,7 +242,7 @@ class Manager:
                 self.optimizer.step()
 
                 # get normal angular error
-                cnt += points.size(0)
+                cnt += output.size(0)
                 total_loss += loss.item()
 
                 degrees = angle_degrees(output.detach().cpu().numpy(), gt.detach().cpu().numpy())
@@ -383,23 +295,22 @@ class Manager:
 
         net.eval()
 
-        for i, data in enumerate(validate_dataloader):
+        for batch_id, data in enumerate(validate_dataloader):
 
             # unpack data
-            nf, points, gt = data[0], data[1], data[2]
-
-            nf = nf.to(device)
-            points = points.to(device)
-            gt = gt.to(device)
-            points = points.transpose(2, 1)
+            for k, v in data.items():
+                if k != 'trans':
+                    data[k] = v.to(device)
 
             # forward
             with torch.no_grad():
-                output = net(points, nf)
+                output = net(data)
 
+            # get loss
+            gt = data['normal']
             loss = compute_loss(output, gt, loss_type=config.train.normal_loss)
             total_loss += loss.item()
-            cnt += points.size(0)
+            cnt += output.size(0)
 
             degrees = angle_degrees(output.detach().cpu().numpy(), gt.detach().cpu().numpy())
             all_degrees.append(degrees)
@@ -417,7 +328,8 @@ class Manager:
 
 if __name__ == '__main__':
 
-    config = PCPNetConfig()
+    CONFIG = import_module('config_' + args.config)
+    config = CONFIG.Config()
 
     # Update config 
     if args.id_cluster is not None:
@@ -429,7 +341,7 @@ if __name__ == '__main__':
     if args.testset is not None:
         config.dataset.test_shape_filenames = args.testset
 
-    # STARTS HERE
+    # START
     if args.test:
         test_models(config, args)
     else:
